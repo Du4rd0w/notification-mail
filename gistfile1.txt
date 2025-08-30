@@ -1,0 +1,95 @@
+//Aciona entre as 17h-18h
+
+function enviarAvisoFaturas() {
+  var ss = SpreadsheetApp.openById("ID da planilha na URL entre d/ e /edit");
+  var sheet = ss.getSheetByName("Nome da aba");
+  var dados = sheet.getDataRange().getValues();
+  var hoje = new Date();
+  hoje.setHours(0,0,0,0);
+
+  var diasAntecedencia = 3;
+  var dataLimite = new Date();
+  dataLimite.setDate(hoje.getDate() + diasAntecedencia);
+  dataLimite.setHours(0,0,0,0);
+
+  var faturasHoje = [];
+  var faturasProximosDias = [];
+  var faturasPagas = [];
+
+  for (var i = 1; i < dados.length; i++) {
+    var dataFatura = dados[i][0];
+    if (dataFatura == "N/A" || dataFatura === "") continue; // Ignorar linhas sem data
+    dataFatura = new Date(dataFatura);
+    dataFatura.setHours(0,0,0,0);
+
+    var descricao = dados[i][1];
+    var tipo = dados[i][2];
+    var valor = dados[i][3];
+    var categoria = dados[i][4];
+    var status = dados[i][6];
+
+    if (status === "Pago") {
+      faturasPagas.push({
+        data: Utilities.formatDate(dataFatura, Session.getScriptTimeZone(), "dd/MM/yyyy"),
+        descricao: descricao,
+        tipo: tipo,
+        valor: valor,
+        categoria: categoria,
+        status: status
+      });
+    } else if (dataFatura >= hoje && dataFatura <= dataLimite) {
+      var diasRestantes = Math.ceil((dataFatura - hoje) / (1000 * 60 * 60 * 24));
+      var target = (diasRestantes === 0) ? faturasHoje : faturasProximosDias;
+      target.push({
+        data: Utilities.formatDate(dataFatura, Session.getScriptTimeZone(), "dd/MM/yyyy"),
+        descricao: descricao,
+        tipo: tipo,
+        valor: valor,
+        categoria: categoria,
+        status: status,
+        diasRestantes: diasRestantes
+      });
+    }
+  }
+
+  function gerarTabela(faturas, avisoHoje) {
+    var html = '<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;">';
+    html += '<tr style="background-color:#f2f2f2;"><th>Data</th><th>Descrição</th><th>Tipo</th><th>Categoria</th><th>Valor</th><th>Status</th></tr>';
+    faturas.forEach(function(f) {
+      var statusHtml = f.status;
+      var descricaoHtml = f.descricao;
+      if (avisoHoje && f.diasRestantes === 0) {
+        statusHtml = "<span style='color:red;'><b>Vence hoje ⚠️</b></span>";
+        descricaoHtml = "<b>" + descricaoHtml + "</b>";
+      } else if (!avisoHoje && f.diasRestantes > 0) {
+        statusHtml = "<span style='color:blue;'>Vence em " + f.diasRestantes + " dia(s)</span>";
+      } else if (f.status === "Pago") {
+        statusHtml = "<span style='color:green;'>Já foi pago ✅</span>";
+      }
+      html += "<tr>";
+      html += "<td>" + f.data + "</td>";
+      html += "<td>" + descricaoHtml + "</td>";
+      html += "<td>" + f.tipo + "</td>";
+      html += "<td>" + f.categoria + "</td>";
+      html += "<td>" + f.valor + "</td>";
+      html += "<td>" + statusHtml + "</td>";
+      html += "</tr>";
+    });
+    html += "</table><br>";
+    return html;
+  }
+
+  var corpoEmail = "<html><body>";
+  if (faturasHoje.length > 0) corpoEmail += "<h3>Faturas que vencem hoje:</h3>" + gerarTabela(faturasHoje, true);
+  if (faturasProximosDias.length > 0) corpoEmail += "<h3>Faturas que vencem nos próximos " + diasAntecedencia + " dias:</h3>" + gerarTabela(faturasProximosDias, false);
+  if (faturasPagas.length > 0) corpoEmail += "<h3>Faturas já pagas:</h3>" + gerarTabela(faturasPagas, false);
+  corpoEmail += "</body></html>";
+
+  if (faturasHoje.length > 0 || faturasProximosDias.length > 0 || faturasPagas.length > 0) {
+    MailApp.sendEmail({
+      to: "seu e-mail",
+      subject: "Aviso: Status de Faturas",
+      htmlBody: corpoEmail
+    });
+  }
+}
